@@ -4,9 +4,6 @@ import clingo
 import telingo
 import telingo.transformers as transformers
 import scheduler as _sd
-import tests.telingo_test as hep
-
-_sc = _sd.Scheduler_Config()
 
 class TestCase(unittest.TestCase):
     def assertRaisesRegex(self, *args, **kwargs):
@@ -26,468 +23,139 @@ def parse_model(m, s, dual):
     return list(map(str, sorted(ret)))
 
 def setattrs(_self, **kwargs):
-    for k,v in kwargs.items():
+    for k, v in kwargs.items():
         setattr(_self, k, v)
     return _self
 
-def solve(s, imin=0, imax=20, dual=False, always=True, v=False, zero=True):
-    global _sc
+def solve(s, sconfig=_sd.Scheduler_Config(), imin=0, imax=20, dual=False, always=True, v=False, zero=True):
     r = []
     prg = clingo.Control(['0'], message_limit=0)
-    scheduler = _sc.single_scheduler()
+    scheduler = sconfig.single_scheduler()
     with prg.builder() as b:
-        program = ("#program always. " if always else "") + s + (" #program initial. :- &final. " if not zero else "")
+        program = ("#program always. " if always else "") + s
+        program = program + (" #program initial. :- &final. " if not zero else "")
         if scheduler:
-            EXTERNALS_PROGRAM  = """
+            externals_program = """
             #program dynamic.  #external skip(t).
             """
-            FORBID_ACTIONS_PROGRAM = """
+            forbid_actions_program = """
             #program dynamic.
             :-     occurs(A),     skip(t). % no action
             """
-            FORCE_ACTIONS_PROGRAM = """
+            force_actions_program = """
             #program dynamic.
             :- not occurs(_), not skip(t). % some action
             """
-            program = program + EXTERNALS_PROGRAM
-            if getattr(_sc,"forbid_actions",False):program = program + FORBID_ACTIONS_PROGRAM
-            if getattr(_sc,"force_actions",False):program = program + FORCE_ACTIONS_PROGRAM
+            program = program + externals_program
+            if getattr(sconfig, "forbid_actions", False): program = program + forbid_actions_program
+            if getattr(sconfig, "force_actions", False): program = program + force_actions_program
         if v: sys.stdout.write("\nprogram: {}\n".format(program))
         future_sigs, reground_parts = transformers.transform([program], b.add)
 
     if scheduler:
-        telingo.smain(prg, future_sigs, reground_parts, lambda m, s: r.append(parse_model(m, s, dual)), imax=imax, imin=imin, scheduler_options=_sc)
+        telingo.smain(prg, future_sigs, reground_parts, lambda m, s: r.append(parse_model(m, s, dual)), imax=imax, imin=imin, scheduler_options=sconfig)
     else:
         sys.stdout.write("missing scheduler\n")
         telingo.imain(prg, future_sigs, reground_parts, lambda m, s: r.append(parse_model(m, s, dual)), imax=imax, imin=imin)
     return sorted(r)
 
 
-class TestSimpleSchedulers(TestCase):
-    """
-    Test cases from basic telingo, test with simple incremental schedulers.
-    """
-
-    def test_simple_schedulers(self):
-        _configs = []
-        global _sc
-        _scA = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scA,conflicts_per_restart=0,A=1,inc=1))
-        _scB = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scB,conflicts_per_restart=0,B=0.1,inc=1))
-        _scC = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scC,conflicts_per_restart=0,C=1))
-
-        for config in _configs:
-            _sc = config
-            # tests from unscheduled telingo
-            self.simple()
-            self.future()
-            self.constraint()
-            self.program()
-            self.theory_boolean()
-            self.theory_tel()
-            self.theory_tel_past()
-            self.theory_tel_future()
-            self.theory_tel_prop()
-            self.classical()
-            self.future_tel()
-            self.other()
-            self.ally()
-            self.eventually()
-            self.sequence()
-            self.assoc()
-            self.arith()
-            self.previous()
-            self.previous2()
-            self.aggregate()
-            self.head()
-
-    def simple(self):
-        self.assertEqual(solve("p."), [['p(0)']])
-        self.assertEqual(solve("p :- q. {q}."), [[], ['p(0)', 'q(0)']])
-        self.assertEqual(solve("p(1..2). q(X) :- p(X)."), [['p(1,0)', 'p(2,0)', 'q(1,0)', 'q(2,0)']])
-        self.assertEqual(solve("p(1;2)."), [['p(1,0)', 'p(2,0)']])
-        self.assertEqual(solve("p(1;2,3)."), [['p(1,0)', 'p(2,3,0)']])
-        self.assertEqual(solve("{p : q}. q."), [['p(0)', 'q(0)'], ['q(0)']])
-        self.assertEqual(solve("p : q. q."), [['p(0)', 'q(0)']])
-        self.assertEqual(solve("r :- p : q. p. {q}."), [['p(0)', 'q(0)', 'r(0)'], ['p(0)', 'r(0)']])
-        self.assertEqual(solve("r :- {p : q} >= 1. p. {q}."), [['p(0)'], ['p(0)', 'q(0)', 'r(0)']])
-        self.assertEqual(solve("{p}. :- &initial, not p."), [['p(0)']])
-        self.assertEqual(solve("{p}. :- &final, not p."), [['p(0)']])
-        self.assertEqual(solve("p. :- &final, &initial."), [['p(0)', 'p(1)']])
-        self.assertEqual(solve("&initial :- a. {a}. q. :- &final, &initial."), [['a(0)', 'q(0)', 'q(1)'], ['q(0)', 'q(1)']])
-        self.assertEqual(solve("p. &false :- &final, &initial."), [['p(0)', 'p(1)']])
-        self.assertEqual(solve("p. &true :- &final, &initial."), [['p(0)']])
-        self.assertEqual(solve("d. :- &final. #program always. p :- d. q :- _d.", always=False), [['d(0)', 'p(0)', 'q(0)', 'q(1)']])
-
-    def future(self):
-        self.assertEqual(solve("p'."), [])
-        self.assertEqual(solve("p' :- q. {q}."), [[]])
-        self.assertEqual(solve("p' :- q. {q}. :- not q, __initial."), [['p(1)', 'q(0)']])
-        self.assertEqual(solve("-p' :- q. {p}. {q}. :- not q, __initial."), [['p(0)', 'q(0)', '-p(1)'], ['q(0)', '-p(1)']])
-        self.assertEqual(solve("p'(1;2,3) :- __initial."), [['p(1,1)', 'p(2,3,1)']])
-
-    def constraint(self):
-        self.assertEqual(solve(":- p'.", always=False), [[]])
-        self.assertEqual(solve(":- not p'. #program always. {p}.", always=False), [['p(0)', 'p(1)'], ['p(1)']])
-        self.assertEqual(solve(":- not p''. #program always. {p}.", always=False), [['p(0)', 'p(1)', 'p(2)'], ['p(0)', 'p(2)'], ['p(1)', 'p(2)'], ['p(2)']])
-
-    def program(self):
-        self.assertEqual(solve("#program always. p.", imin=2), [['p(0)'], ['p(0)', 'p(1)']])
-        self.assertEqual(solve("#program initial. p.", imin=2), [['p(0)'], ['p(0)']])
-        self.assertEqual(solve("#program final. p.", imin=2), [['p(0)'], ['p(1)']])
-        self.assertEqual(solve("#program dynamic. p.", imin=2), [[], ['p(1)']])
-
-    def theory_boolean(self):
-        self.assertEqual(solve('{p(-a,1+2,"test")}. q :- not &tel {p(-a,1+2,"test")}.'), [['p(-a,3,"test",0)'], ['q(0)']])
-        self.assertEqual(solve("{p}. q :- not &tel {p}."), [['p(0)'], ['q(0)']])
-        self.assertEqual(solve("{p}. q :- not &tel {p}. r :- not &tel {p}."), [['p(0)'], ['q(0)', 'r(0)']])
-        self.assertEqual(solve('{p(1,a,(1,a),f(2,a),"test",#inf,#sup)}. q(0) :- not &tel {p(1,a,(1,a),f(2,a),"test",#inf,#sup)}.'), [['p(1,a,(1,a),f(2,a),"test",#inf,#sup,0)'], ['q(0,0)']])
-        self.assertEqual(solve("{p; q}. :- not &tel {p & q}."), [['p(0)', 'q(0)']])
-        self.assertEqual(solve("{p; q}. :- &tel {p | q}."), [[]])
-        self.assertEqual(solve("{p; q}. :- &tel {p <> q}."), [[], ['p(0)', 'q(0)']])
-        self.assertEqual(solve("{p; q}. :- &tel {p -> q}."), [['p(0)']])
-        self.assertEqual(solve("{p; q}. :- &tel {p <- q}."), [['q(0)']])
-        self.assertEqual(solve("{p; q}. :- &tel {~p | ~q}."), [['p(0)', 'q(0)']])
-        self.assertEqual(solve("{p; q}. :- &tel {~(~p & ~q)}."), [[]])
-
-    def theory_tel(self):
-        self.assertRaisesRegex(RuntimeError, "leading primes", solve, ":- &tel {'p}.")
-        self.assertRaisesRegex(RuntimeError, "trailing primes", solve, ":- &tel {p'}.")
-        self.assertEqual(solve("{p}. :- not &tel {p}."), [['p(0)']])
-
-    def theory_tel_past(self):
-        self.assertEqual(solve("{p}. :- __final, not &tel {<p}."), [['p(0)'], ['p(0)', 'p(1)']])
-        self.assertEqual(solve("{p}. :- __final, &tel {<:p}."), [[], ['p(1)']])
-        self.assertEqual(solve("{p}. :- __final, not &tel {<*p}.", imin=3), [['p(0)'], ['p(0)', 'p(1)'], ['p(0)', 'p(1)', 'p(2)']])
-        self.assertEqual(solve("q. {p}. :- __final, &tel {<?p}.", imin=3), [['q(0)'], ['q(0)', 'q(1)'], ['q(0)', 'q(1)', 'q(2)']])
-        self.assertEqual(solve("s. {q;p}. :- __final, not &tel { < s }. :- not &tel {p <* q}."), [
-            ['p(0)', 'p(1)', 'q(0)', 'q(1)', 's(0)', 's(1)'],
-            ['p(0)', 'q(0)', 'q(1)', 's(0)', 's(1)'],
-            ['p(1)', 'q(0)', 'q(1)', 's(0)', 's(1)'],
-            ['q(0)', 'q(1)', 's(0)', 's(1)']])
-        self.assertEqual(solve("s. {q;p}. :- __final, not &tel { < s }. :- __final, not &tel {p <* q}."), [
-            ['p(0)', 'p(1)', 'q(0)', 'q(1)', 's(0)', 's(1)'],
-            ['p(0)', 'p(1)', 'q(1)', 's(0)', 's(1)'],
-            ['p(0)', 'q(0)', 'q(1)', 's(0)', 's(1)'],
-            ['p(1)', 'q(0)', 'q(1)', 's(0)', 's(1)'],
-            ['p(1)', 'q(1)', 's(0)', 's(1)'],
-            ['q(0)', 'q(1)', 's(0)', 's(1)']])
-        self.assertEqual(solve("s. {q;p}. :- &tel {(~p) <* (~q)}."), [
-            ['p(0)', 'q(0)', 's(0)'],
-            ['q(0)', 's(0)']])
-        models = solve("""\
-            s.
-            {q;p}.
-            #program final.
-            :- not &tel { < s }.
-            #program initial.
-            :- not q.
-            :- not q', not p'.
-            :- not q', not q.
-            """)
-        self.assertEqual(models, solve("s. {q;p}. :- __final, not &tel { < s }. :- &tel {(~p) <* (~q)}."))
-        self.assertEqual(models, solve("s. {q;p}. :- __final, not &tel { < s }. :- not &tel {p <? q}."))
-
-    def theory_tel_future(self):
-        self.assertEqual(solve("{p}. :- __initial, not &tel {>p}."), [['p(0)', 'p(1)'], ['p(1)']])
-        self.assertEqual(solve("{p}. :- __initial, not &tel {> > p}."), [['p(0)', 'p(1)', 'p(2)'], ['p(0)', 'p(2)'], ['p(1)', 'p(2)'], ['p(2)']])
-        self.assertEqual(solve("{p}. #program initial. :- not &tel {> > p}."), [['p(0)', 'p(1)', 'p(2)'], ['p(0)', 'p(2)'], ['p(1)', 'p(2)'], ['p(2)']])
-        self.assertEqual(solve("s. {p}. #program initial. :- not &tel {>* p}.", imin=3), [['p(0)', 'p(1)', 'p(2)', 's(0)', 's(1)', 's(2)'], ['p(0)', 'p(1)', 's(0)', 's(1)'], ['p(0)', 's(0)']])
-        self.assertEqual(solve("s. {p}. #program initial. :- &tel {>? p}.", imin=3), [['s(0)'], ['s(0)', 's(1)'], ['s(0)', 's(1)', 's(2)']])
-        self.assertEqual(solve("q. {p}. :- __initial, &tel {>?p}.", imin=3), [['q(0)'], ['q(0)', 'q(1)'], ['q(0)', 'q(1)', 'q(2)']])
-        self.assertEqual(solve("s. {q;p}. :- __final, not &tel { < s }. :- __initial, &tel {p >? q}."), [
-            ['p(0)', 'p(1)', 's(0)', 's(1)'],
-            ['p(0)', 's(0)', 's(1)'],
-            ['p(1)', 'q(1)', 's(0)', 's(1)'],
-            ['p(1)', 's(0)', 's(1)'],
-            ['q(1)', 's(0)', 's(1)'],
-            ['s(0)', 's(1)']])
-        self.assertEqual(solve("s. {q;p}. :- __final, not &tel { < s }. :- __initial, not &tel {p >* q}."), [
-            ['p(0)', 'p(1)', 'q(0)', 'q(1)', 's(0)', 's(1)'],
-            ['p(0)', 'p(1)', 'q(0)', 's(0)', 's(1)'],
-            ['p(0)', 'q(0)', 'q(1)', 's(0)', 's(1)'],
-            ['p(0)', 'q(0)', 's(0)', 's(1)'],
-            ['p(1)', 'q(0)', 'q(1)', 's(0)', 's(1)'],
-            ['q(0)', 'q(1)', 's(0)', 's(1)']])
-
-    def theory_tel_prop(self):
-        self.assertEqual(solve("q. {p}. :- __initial, &tel {>?p}.", imin=3), solve("q. {p}. :- __final, &tel {<?p}.", imin=3))
-        self.assertEqual(solve("q. {p}. :- __initial, not &tel {>?p}.", imin=3), solve("q. {p}. :- __final, not &tel {<?p}.", imin=3))
-        self.assertEqual(solve("q. {p}. :- __initial, &tel {>*p}.", imin=3), solve("q. {p}. :- __final, &tel {<*p}.", imin=3))
-        self.assertEqual(solve("q. {p}. :- __initial, not &tel {>*p}.", imin=3), solve("q. {p}. :- __final, not &tel {<*p}.", imin=3))
-        self.assertEqual(solve("s. {p;q}. :- __initial, &tel {p>?q}.", imin=2), solve("s. {p;q}. :- __final, &tel {p<?q}.", imin=2, dual=True))
-        self.assertEqual(solve("s. {p;q}. :- __initial, &tel {p>*q}.", imin=2), solve("s. {p;q}. :- __final, &tel {p<*q}.", imin=2, dual=True))
-        self.assertEqual(solve("s. {p;q;r}. :- __initial, &tel {p>*(q>?r)}.", imin=2), solve("s. {p;q;r}. :- __final, &tel {p<*(q<?r)}.", imin=2, dual=True))
-        self.assertEqual(solve("s. {p;q;r}. :- &tel {p>*(q>?r)}.", imin=2), solve("s. {p;q;r}. :- &tel {p<*(q<?r)}.", imin=2, dual=True))
-        self.assertEqual(solve("s. {p;q;r}. :- &tel {p>*(q<?r)}.", imin=2), solve("s. {p;q;r}. :- &tel {p<*(q>?r)}.", imin=2, dual=True))
-        self.assertEqual(solve("s. {p;q;r}. :- &tel {p<*(q>?r)}.", imin=2), solve("s. {p;q;r}. :- &tel {p>*(q<?r)}.", imin=2, dual=True))
-
-    def classical(self):
-        self.assertEqual(solve("-q."), [['-q(0)']])
-        self.assertEqual(solve("{-q}. :- not &tel{ -q }."), [['-q(0)']])
-        self.assertEqual(solve("{-q(9)}. :- not &tel{ -q(9) }."), [['-q(9,0)']])
-
-    def future_tel(self):
-        self.assertEqual(solve("1 {p;q} 1. :- p', &tel { q }.", imin=2), [['p(0)'], ['p(0)', 'p(1)'], ['p(0)', 'q(1)'], ['q(0)'], ['q(0)', 'q(1)']])
-
-    def other(self):
-        self.assertEqual(solve("p. :- &tel { &final & &initial }."), [['p(0)', 'p(1)']])
-        self.assertEqual(solve("p :- not not &tel { &true }. q :- not not &tel { &false }."), [['p(0)']])
-
-    def ally(self):
-        self.assertEqual(solve("d. :- &final. #program always. p :- d. q :- not not &tel { << d }.", always=False), [['d(0)', 'p(0)', 'q(0)', 'q(1)']])
-        self.assertEqual(solve("#program final. d. #program always. p :- d. q :- not not &tel { >> d }.", always=False, imin=3), [
-            ['d(0)', 'p(0)', 'q(0)'],
-            ['d(1)', 'p(1)', 'q(0)', 'q(1)'],
-            ['d(2)', 'p(2)', 'q(0)', 'q(1)', 'q(2)']])
-
-    def eventually(self):
-        s = '''
-        #program initial.
-        aux.
-        #program dynamic.
-        aux :- 'aux, not 'q.
-        #program always.
-        p.
-        q :- aux, not &tel{ > >? q }.
-        #show p/0.
-        #show q/0.
-        '''
-        self.assertEqual(solve(s, imin=3), [
-            ['p(0)', 'p(1)', 'p(2)', 'q(0)'],
-            ['p(0)', 'p(1)', 'p(2)', 'q(1)'],
-            ['p(0)', 'p(1)', 'p(2)', 'q(2)'],
-            ['p(0)', 'p(1)', 'q(0)'],
-            ['p(0)', 'p(1)', 'q(1)'],
-            ['p(0)', 'q(0)']])
-        self.assertEqual(solve(s + "#program initial. q.", imin=3), [['p(0)', 'p(1)', 'p(2)', 'q(0)'], ['p(0)', 'p(1)', 'q(0)'], ['p(0)', 'q(0)']])
-        self.assertEqual(solve(s + "#program initial. q'.", imin=3), [['p(0)', 'p(1)', 'p(2)', 'q(1)'], ['p(0)', 'p(1)', 'q(1)']])
-        self.assertEqual(solve(s + "#program initial. q''.", imin=3), [['p(0)', 'p(1)', 'p(2)', 'q(2)']])
-
-    def sequence(self):
-        self.assertEqual(solve("{b}. a. #program initial. :- not &tel {b ;> b}.", imin=3), [['a(0)', 'a(1)', 'a(2)', 'b(0)', 'b(1)'], ['a(0)', 'a(1)', 'a(2)', 'b(0)', 'b(1)', 'b(2)'], ['a(0)', 'a(1)', 'b(0)', 'b(1)']])
-        self.assertEqual(solve("{b}. a. #program final. :- not &tel {b <; b}.", imin=3), [['a(0)', 'a(1)', 'a(2)', 'b(0)', 'b(1)', 'b(2)'], ['a(0)', 'a(1)', 'a(2)', 'b(1)', 'b(2)'], ['a(0)', 'a(1)', 'b(0)', 'b(1)']])
-        self.assertEqual(solve("{b}. a. #program initial. :- not &tel {b ;> b ;> b}.", imin=3), [['a(0)', 'a(1)', 'a(2)', 'b(0)', 'b(1)', 'b(2)']])
-        self.assertEqual(solve("{b}. a. #program final. :- not &tel {b <; b <; b}.", imin=3), [['a(0)', 'a(1)', 'a(2)', 'b(0)', 'b(1)', 'b(2)']])
-        self.assertEqual(solve("{b}. a. #program initial. :- not &tel {b ;>: b}.", imin=2), [['a(0)', 'a(1)', 'b(0)', 'b(1)'], ['a(0)', 'b(0)']])
-        self.assertEqual(solve("{b}. a. #program final. :- not &tel {b <:; b}.", imin=2), [['a(0)', 'a(1)', 'b(0)', 'b(1)'], ['a(0)', 'b(0)']])
-
-    def assoc(self):
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< 4 < b}."),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< < < < < b}."))
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< 2 < 2 < b}."),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< < < < < b}."))
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< < < 2 < b}."),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< < < < < b}."))
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< < 2 < < b}."),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< < < < < b}."))
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< 2 < < 2 < b}."),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< < < < < < b}."))
-
-    def arith(self):
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {1+2 < b}."), [['a(0)', 'a(1)', 'a(2)', 'a(3)', 'b(0)']])
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {-1+5-1 < b}."), [['a(0)', 'a(1)', 'a(2)', 'a(3)', 'b(0)']])
-
-    def previous(self):
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< < < b}."), [['a(0)', 'a(1)', 'a(2)', 'a(3)', 'b(0)']])
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {3 < b}."),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< < < b}."))
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {5 < b}."),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {< < < < < b}."))
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {<: <: b}.", imin=3), [
-            ['a(0)'],
-            ['a(0)', 'a(1)'],
-            ['a(0)', 'a(1)', 'a(2)', 'b(0)'],
-            ['a(0)', 'a(1)', 'b(0)'],
-            ['a(0)', 'a(1)', 'b(1)'],
-            ['a(0)', 'b(0)']])
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {2 <: b}.", imin=3),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {<: <: b}.", imin=3))
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {4 <: b}.", imin=5),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program final. :- not &tel {<: <: <: <: b}.", imin=5))
-
-    def previous2(self):
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program initial. :- not &tel {> > > b}."), [['a(0)', 'a(1)', 'a(2)', 'a(3)', 'b(3)']])
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program initial. :- not &tel {> > > b}."),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program initial. :- not &tel {3 > b}."))
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program initial. :- not &tel {> > > > > b}."),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program initial. :- not &tel {5 > b}."))
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program initial. :- not &tel {>: >: b}.", imin=3), [
-            ['a(0)'],
-            ['a(0)', 'a(1)'],
-            ['a(0)', 'a(1)', 'a(2)', 'b(2)'],
-            ['a(0)', 'a(1)', 'b(0)'],
-            ['a(0)', 'a(1)', 'b(1)'],
-            ['a(0)', 'b(0)']])
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program initial. :- not &tel {2 >: b}.", imin=3),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program initial. :- not &tel {>: >: b}.", imin=3))
-        self.assertEqual(solve("{b}. a. :- b, &tel { > >? b}.  #program initial. :- not &tel {4 >: b}.", imin=5),
-                         solve("{b}. a. :- b, &tel { > >? b}.  #program initial. :- not &tel {>: >: >: >: b}.", imin=5))
-
-    def aggregate(self):
-        self.assertEqual(solve(":- &tel {}."), [])
-        self.assertEqual(solve(":- not &tel {}."), [[]])
-        self.assertEqual(solve("{a; b}. :- not &tel {a; b}."), [['a(0)', 'b(0)']])
-        self.assertEqual(
-            solve("{ p(1..3); q(1..3) }. :-        p(X) : q(X)."),
-            solve("{ p(1..3); q(1..3) }. :- &tel { p(X) : q(X) }."), [])
-
-    def head(self):
-        self.assertEqual(solve("{body}. &tel { (a & b) | (c & (d | f)) } :- body."), [[], ['a(0)', 'b(0)', 'body(0)'], ['body(0)', 'c(0)', 'd(0)'], ['body(0)', 'c(0)', 'f(0)']])
-        self.assertEqual(solve("#program initial. &tel { > b & b | > > c}. #program always. s.", imin=3),
-            [ ['b(0)', 'b(1)', 's(0)', 's(1)']
-            , ['b(0)', 'b(1)', 's(0)', 's(1)', 's(2)']
-            , ['c(2)', 's(0)', 's(1)', 's(2)']
-            ])
-        self.assertEqual(solve("{c}. &tel { a | ~c }."), [[], ['a(0)', 'c(0)']])
-        self.assertEqual(solve("{c}. &tel { a | ~ ~c }."), [['a(0)'], ['c(0)']])
-        self.assertEqual(solve("&tel { a | &true }."), [[]])
-        self.assertEqual(solve("&tel { a | &false }."), [['a(0)']])
-        self.assertEqual(solve("{a;b;c}. &tel { ~(a & b & c) }."),
-            [ []
-            , ['a(0)']
-            , ['a(0)', 'b(0)']
-            , ['a(0)', 'c(0)']
-            , ['b(0)']
-            , ['b(0)', 'c(0)']
-            , ['c(0)']
-            ])
-        self.assertEqual(solve("&tel { >* a & > > b }.", always=False), [['a(0)', 'a(1)', 'a(2)', 'b(2)']])
-        self.assertEqual(solve("&tel { >? a & > > b }.", always=False), [['a(0)', 'b(2)'], ['a(1)', 'b(2)'], ['a(2)', 'b(2)']])
-        self.assertEqual(solve("#program initial. &tel { > > c }.  &tel { >? b }. #program always. &tel { >* a } :- b."),
-            [ ['a(0)', 'a(1)', 'a(2)', 'b(0)', 'c(2)']
-            , ['a(1)', 'a(2)', 'b(1)', 'c(2)']
-            , ['a(2)', 'b(2)', 'c(2)']
-            ])
-        self.assertEqual(solve("&tel { a >? b & 2 > c }.", always=False, imin=3),
-            [ ['a(0)', 'a(1)', 'b(2)', 'c(2)']
-            , ['a(0)', 'b(1)', 'c(2)']
-            , ['b(0)', 'c(2)']
-            ])
-        self.assertEqual(solve("&tel { a >* b & 2 > c }.", always=False, imin=3),
-            [ ['a(0)', 'b(0)', 'c(2)']
-            , ['a(1)', 'b(0)', 'b(1)', 'c(2)']
-            , ['b(0)', 'b(1)', 'b(2)', 'c(2)']
-            ])
-        self.assertEqual(solve("&tel { >? >* a }. #program always. c.", always=False, imin=3),
-            [ ['a(0)', 'c(0)']
-            , ['a(1)', 'c(0)', 'c(1)']
-            , ['a(2)', 'c(0)', 'c(1)', 'c(2)']
-            ])
-        self.assertEqual(solve("&tel { >* c }.  &tel { >> a }.", always=False, imin=3),
-            [ ['a(0)', 'c(0)']
-            , ['a(1)', 'c(0)', 'c(1)']
-            , ['a(2)', 'c(0)', 'c(1)', 'c(2)']
-            ])
-        self.assertEqual(solve("&tel { a ;> b ;> c }.", always=False), [['a(0)', 'b(1)', 'c(2)']])
-        self.assertEqual(solve("&tel { a(1) ;> b(2) ;> c(3) }.", always=False), [['a(1,0)', 'b(2,1)', 'c(3,2)']])
-        self.assertEqual(solve("&tel { a(X) ;> b(X) ;> c(X) } :- X=(1;2).", always=False), [['a(1,0)', 'a(2,0)', 'b(1,1)', 'b(2,1)', 'c(1,2)', 'c(2,2)']])
-        self.assertEqual(solve("&tel { a ;>: b ;>: c }.", always=False, imin=3), [['a(0)'], ['a(0)', 'b(1)'], ['a(0)', 'b(1)', 'c(2)']])
-        self.assertEqual(solve("&tel { >* (&final | a) }. &tel { >* b }.", always=False, imin=3),
-            [ ['a(0)', 'a(1)', 'b(0)', 'b(1)', 'b(2)']
-            , ['a(0)', 'b(0)', 'b(1)']
-            , ['b(0)']
-            ])
-        self.assertEqual(solve("&tel { >* (&initial | a) }. &tel { >* b }.", always=False, imin=3),
-            [ ['a(1)', 'a(2)', 'b(0)', 'b(1)', 'b(2)']
-            , ['a(1)', 'b(0)', 'b(1)']
-            , ['b(0)']
-            ])
-        self.assertEqual(solve("&tel { 2 > a }. &tel { >* b }.", always=False),
-            [ ['a(2)', 'b(0)', 'b(1)', 'b(2)']
-            ])
-        self.assertEqual(solve("&tel { 2 >: a }. &tel { >* b }.", always=False, imin=3),
-            [ ['a(2)', 'b(0)', 'b(1)', 'b(2)']
-            , ['b(0)']
-            , ['b(0)', 'b(1)']
-            ])
-
-
 class TestScheduler(TestCase):
-
+    """ class containing all tests for scheduled telingo."""
     def test_scheduler_inc_linear(self):
+        """ tests for linear growth schedulers algorithm. """
         _configs = []
-        global _sc
-        _scA = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scA,conflicts_per_restart=0,A=1,inc=3))
-        _scB = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scB,conflicts_per_restart=0,B=0.1,inc=3))
+        # scheduler A, size = 1, inc = 3
+        _configs.append(setattrs(_sd.Scheduler_Config(), conflicts_per_restart=0, A=1, inc=3))
+        # scheduler B, gamma = 0.1, inc = 3
+        _configs.append(setattrs(_sd.Scheduler_Config(), conflicts_per_restart=0, B=0.1, inc=3))
 
-        for config in _configs:
-            _sc = config
-
-            self.assertEqual(solve("p.",imin=3), [['p(0)'], ['p(0)', 'p(1)', 'p(2)', 'p(3)'], ['p(0)', 'p(1)', 'p(2)', 'p(3)', 'p(4)', 'p(5)', 'p(6)']])
-            self.assertEqual(solve("p. q:-'p.",imin=2), [['p(0)'], ['p(0)', 'p(1)', 'p(2)', 'p(3)', 'q(1)', 'q(2)', 'q(3)']])
-            self.assertEqual(solve("p :- &initial. p :- not 'p. :- not p, &final.",zero=False), [['p(0)', 'p(2)', 'p(4)', 'p(6)']])
-            self.assertEqual(solve("p :- not 'p, not &initial. :- not p, &final.",zero=False), [['p(1)', 'p(3)']])
-            self.assertEqual(solve("#program final. p.",zero=False),[['p(3)']])
-            self.assertEqual(solve("p :- not &initial. :- p, &final."),[[]])
-            self.assertEqual(solve("1{p;q}1. q :- 'p. p :- 'q.",zero=False), [['p(0)', 'p(2)', 'q(1)', 'q(3)'], ['p(1)', 'p(3)', 'q(0)', 'q(2)']])
+        for sconfig in _configs:
+            self.assertEqual(solve("p.", sconfig, imin=3), [
+                ['p(0)'],
+                ['p(0)', 'p(1)', 'p(2)', 'p(3)'],
+                ['p(0)', 'p(1)', 'p(2)', 'p(3)', 'p(4)', 'p(5)', 'p(6)']])
+            self.assertEqual(solve("p. q:-'p.", sconfig, imin=2), [
+                ['p(0)'],
+                ['p(0)', 'p(1)', 'p(2)', 'p(3)', 'q(1)', 'q(2)', 'q(3)']])
+            self.assertEqual(solve("p :- &initial. p :- not 'p. :- not p, &final.", sconfig, zero=False), [['p(0)', 'p(2)', 'p(4)', 'p(6)']])
+            self.assertEqual(solve("p :- not 'p, not &initial. :- not p, &final.", sconfig, zero=False), [['p(1)', 'p(3)']])
+            self.assertEqual(solve("#program final. p.", sconfig, zero=False), [['p(3)']])
+            self.assertEqual(solve("p :- not &initial. :- p, &final.", sconfig), [[]])
+            self.assertEqual(solve("1{p;q}1. q :- 'p. p :- 'q.", sconfig, zero=False), [
+                ['p(0)', 'p(2)', 'q(1)', 'q(3)'], ['p(1)', 'p(3)', 'q(0)', 'q(2)']])
 
     def test_scheduler_inc_exp(self):
-        global _sc
-        _sc = _sd.Scheduler_Config()
-        setattrs(_sc,conflicts_per_restart=0,C=2)
-        self.assertEqual(solve("p.",imin=4), [['p(0)'], ['p(0)', 'p(1)'], ['p(0)', 'p(1)', 'p(2)'], ['p(0)', 'p(1)', 'p(2)', 'p(3)', 'p(4)']])
-        self.assertEqual(solve("p:-&initial. p:-not 'p. :- not p, &final.",imin=4,zero=False), [['p(0)', 'p(2)'], ['p(0)', 'p(2)', 'p(4)']])
-        self.assertEqual(solve("p :- not 'p, not &initial. :- not p, &final.",imin=4,zero=False), [['p(1)']])
-        self.assertEqual(solve("p :- not 'p, not &initial. :- p, &final.",imin=4,zero=False), [['p(1)'], ['p(1)', 'p(3)']])
-        self.assertEqual(solve("1{p;q}1. q :- 'p. p :- 'q.",imin=3,zero=False), [['p(0)', 'p(2)', 'q(1)'], ['p(0)', 'q(1)'], ['p(1)', 'q(0)'], ['p(1)', 'q(0)', 'q(2)']])
+        """ tests for exponential growth schedulers algorithm. """
+        sconfig = _sd.Scheduler_Config()
+        setattrs(sconfig, conflicts_per_restart=0, C=2)
+        self.assertEqual(solve("p.", sconfig, imin=4), [
+            ['p(0)'],
+            ['p(0)', 'p(1)'],
+            ['p(0)', 'p(1)', 'p(2)'],
+            ['p(0)', 'p(1)', 'p(2)', 'p(3)', 'p(4)']])
+        self.assertEqual(solve("p:-&initial. p:-not 'p. :- not p, &final.", sconfig, imin=4, zero=False), [
+            ['p(0)', 'p(2)'],
+            ['p(0)', 'p(2)', 'p(4)']])
+        self.assertEqual(solve("p :- not 'p, not &initial. :- not p, &final.", sconfig, imin=4, zero=False), [['p(1)']])
+        self.assertEqual(solve("p :- not 'p, not &initial. :- p, &final.", sconfig, imin=4, zero=False), [['p(1)'], ['p(1)', 'p(3)']])
+        self.assertEqual(solve("1{p;q}1. q :- 'p. p :- 'q.", sconfig, imin=3, zero=False), [
+            ['p(0)', 'p(2)', 'q(1)'],
+            ['p(0)', 'q(1)'],
+            ['p(1)', 'q(0)'],
+            ['p(1)', 'q(0)', 'q(2)']])
 
     def test_scheduler_start(self):
+        """ tests for scheduler start parameter. """
         _configs = []
-        global _sc
-        _scA = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scA,conflicts_per_restart=0,A=1,inc=1,start=3))
-        _scB = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scB,conflicts_per_restart=0,B=0.1,inc=1,start=3))
-        _scC = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scC,conflicts_per_restart=0,C=1,start=3))
+        # scheduler A, size = 1, inc = 1, start = 3
+        _configs.append(setattrs(_sd.Scheduler_Config(), conflicts_per_restart=0, A=1, inc=1, start=3))
+        # scheduler B, gamma = 0.1, inc = 1, start = 3
+        _configs.append(setattrs(_sd.Scheduler_Config(), conflicts_per_restart=0, B=0.1, inc=1, start=3))
+        # scheduler C, exponent = 1, start = 3
+        _configs.append(setattrs(_sd.Scheduler_Config(), conflicts_per_restart=0, C=1, start=3))
 
-        for config in _configs:
-            _sc = config
-            self.assertEqual(solve("p."), [['p(0)', 'p(1)', 'p(2)', 'p(3)']])
-            self.assertEqual(solve("p:-&initial. p:-not 'p. :- not p, &final."), [['p(0)', 'p(2)', 'p(4)']])
-            self.assertEqual(solve("p :- not 'p, not &initial. :- not p, &final."), [['p(1)', 'p(3)']])
+        for sconfig in _configs:
+            self.assertEqual(solve("p.", sconfig), [['p(0)', 'p(1)', 'p(2)', 'p(3)']])
+            self.assertEqual(solve("p:-&initial. p:-not 'p. :- not p, &final.", sconfig), [['p(0)', 'p(2)', 'p(4)']])
+            self.assertEqual(solve("p :- not 'p, not &initial. :- not p, &final.", sconfig), [['p(1)', 'p(3)']])
 
     def test_scheduler_limit(self):
+        """ tests for limit parameter. """
         _configs = []
-        global _sc
-        _scA = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scA,conflicts_per_restart=0,A=1,inc=1,limit=3))
-        _scB = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scB,conflicts_per_restart=0,B=0.1,inc=1,limit=3))
-        _scC = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scC,conflicts_per_restart=0,C=1,limit=3))
+        # scheduler A, size = 1, inc = 1, limit = 3
+        _configs.append(setattrs(_sd.Scheduler_Config(), conflicts_per_restart=0, A=1, inc=1, limit=3))
+        # scheduler B, gamma = 0.1, inc = 1, limit = 3
+        _configs.append(setattrs(_sd.Scheduler_Config(), conflicts_per_restart=0, B=0.1, inc=1, limit=3))
+        # scheduler C, exponent = 1, limit = 3
+        _configs.append(setattrs(_sd.Scheduler_Config(), conflicts_per_restart=0, C=1, limit=3))
 
-        for config in _configs:
-            _sc = config
-            self.assertEqual(solve("p(0):-&initial. p(I+1):-'p(I). :- &final, p(I), I<5."), [])
+        for sconfig in _configs:
+            self.assertEqual(solve("p(0):-&initial. p(I+1):-'p(I). :- &final, p(I), I<5.", sconfig), [])
 
     def test_scheduler_force_action(self):
+        """ tests for the force action parameter. """
         _configs = []
-        global _sc
-        _scA = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scA,conflicts_per_restart=0,A=1,inc=1,force_actions=True))
-        _scB = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scB,conflicts_per_restart=0,B=0.1,inc=1,force_actions=True))
-        _scC = _sd.Scheduler_Config()
-        _configs.append(setattrs(_scC,conflicts_per_restart=0,C=1,force_actions=True))
+        # scheduler A, size = 1, inc = 1, force_actions = True
+        _configs.append(setattrs(_sd.Scheduler_Config(), conflicts_per_restart=0, A=1, inc=1, force_actions=True))
+        # scheduler B, gamma = 0.1, inc = 1, force_actions = True
+        _configs.append(setattrs(_sd.Scheduler_Config(), conflicts_per_restart=0, B=0.1, inc=1, force_actions=True))
+        # scheduler C, exponent = 1, force_actions = True
+        _configs.append(setattrs(_sd.Scheduler_Config(), conflicts_per_restart=0, C=1, force_actions=True))
 
-        for config in _configs:
-            _sc = config
-
+        for sconfig in _configs:
             s = '''
             #program dynamic.
             {occurs(a)}.
             p:-occurs(a).
             #show p/0.
             '''
-            self.assertEqual(solve(s,imin=4, zero=False),[['p(1)'],['p(1)','p(2)'],['p(1)','p(2)','p(3)']])
-            setattrs(_sc,start=3)
-            self.assertEqual(solve(s),[['p(1)','p(2)','p(3)']])
+            self.assertEqual(solve(s, sconfig, imin=4, zero=False), [
+                ['p(1)'],
+                ['p(1)', 'p(2)'],
+                ['p(1)', 'p(2)', 'p(3)']])
+            setattrs(sconfig, start=3)
+            self.assertEqual(solve(s, sconfig), [['p(1)', 'p(2)', 'p(3)']])
 
 
 if __name__ == '__main__':

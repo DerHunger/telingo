@@ -45,11 +45,12 @@ class Solver:
         self.__verbose     = verbose
         self.__result      = None
         self.__theory      = theory
+        self.__time0       = clock()
 
         # set solving and restart policy
         self.__ctl.configuration.solve.solve_limit = "umax,"+str(restarts_per_solve)
         if int(conflicts_per_restart) != 0:
-            self.__ctl.configuration.solver[0].restarts="F,"+str(conflicts_per_restart)
+            self.__ctl.configuration.solver[0].restarts = "F,"+str(conflicts_per_restart)
 
         self.__move_final = move_final
 
@@ -61,7 +62,7 @@ class Solver:
         self.__time0 = clock()
 
 
-    def __verbose_end(self,string):
+    def __verbose_end(self, string):
         """
         Ends the verbose timer and prints the time with a given string.
 
@@ -71,7 +72,7 @@ class Solver:
         _sys.stdout.write(string+" Time:\t {:.2f}s\n".format(clock()-self.__time0))
 
 
-    def solve(self,length, future_sigs, program_parts, on_model):
+    def solve(self, length, future_sigs, program_parts, on_model):
         """
         Grounds and solves the scheduler length.
 
@@ -80,11 +81,11 @@ class Solver:
         program_parts   -- program parts to ground and solve.
         on_model        -- callback for intercepting models.
         """
-        if self.__verbose:_sys.stdout.write("Grounded Until:\t {}\n".format(self.__length))
+        if self.__verbose: _sys.stdout.write("Grounded Until:\t {}\n".format(self.__length))
         # previous length < new length
         if self.__length < length:
             parts = []
-            for t in range(self.__length+1,length+1):
+            for t in range(self.__length+1, length+1):
                 for root_name, part_name, rng in program_parts:
                     for i in rng:
                         if ((t - i >= 0 and root_name == "always") or
@@ -113,12 +114,12 @@ class Solver:
         # blocking or unblocking actions
         if length < self.__last_length:
             if self.__verbose: _sys.stdout.write("Blocking actions...\n")
-            for t in range(length+1,self.__last_length+1):
-                self.__ctl.assign_external(_clingo.Function("skip",[t]),True)
+            for t in range(length+1, self.__last_length+1):
+                self.__ctl.assign_external(_clingo.Function("skip", [t]), True)
         elif self.__last_length < length:
             if self.__verbose: _sys.stdout.write("Unblocking actions...\n")
-            for t in range(self.__last_length+1,length+1):
-                self.__ctl.assign_external(_clingo.Function("skip",[t]),False)
+            for t in range(self.__last_length+1, length+1):
+                self.__ctl.assign_external(_clingo.Function("skip", [t]), False)
 
         # solve
         if self.__verbose: self.__verbose_start()
@@ -245,7 +246,7 @@ def smain(prg, future_sigs, program_parts, on_model, imin=0, imax=None, istop="S
     prg.assign_external(_clingo.Function("__final", [step]), True)
 
     #solver
-    solver = Solver(prg,theory,scheduler_options.restarts_per_solve, scheduler_options.conflicts_per_restart, scheduler_options.move_final, scheduler_options.verbose)
+    solver = Solver(prg, theory, scheduler_options.restarts_per_solve, scheduler_options.conflicts_per_restart, scheduler_options.move_final, scheduler_options.verbose)
 
     #scheduler
     scheduler = scheduler_options.build_scheduler()
@@ -257,16 +258,16 @@ def smain(prg, future_sigs, program_parts, on_model, imin=0, imax=None, istop="S
     i = 1
     while ((imax is None or step < imax) and
            (step == 0 or step < imin or (
-              (istop == "SAT"     and not ret.satisfiable) or
-              (istop == "UNSAT"   and not ret.unsatisfiable) or
-              (istop == "UNKNOWN" and not ret.unknown)))):
+               (istop == "SAT"     and not ret.satisfiable) or
+               (istop == "UNSAT"   and not ret.unsatisfiable) or
+               (istop == "UNKNOWN" and not ret.unknown)))):
         if scheduler_options.verbose:
             _sys.stdout.write("Iteration "+str(i)+"\n")
             time0 = clock()
         i += 1
         # get current solve length from scheduler
         length = scheduler.next(ret)
-        if length == None:
+        if length is None:
             _sys.stdout.write("PLAN NOT FOUND\n")
             break
         # solve given length
@@ -337,18 +338,18 @@ class Application:
         """
         Parse argument with value greater than a minimum.
         """
-        setattr(self.__scheduler_config,argument,int(value))
-        return getattr(self.__scheduler_config,argument) >= minimum
+        setattr(self.__scheduler_config, argument, int(value))
+        return getattr(self.__scheduler_config, argument) >= minimum
 
     def __parse_scheduler_boolean(self, value, argument):
         """
         Parse argument with boolean value.
         """
         if value.upper() in ['TRUE', '1', 'T', 'Y', 'YES']:
-            setattr(self.__scheduler_config,argument,True)
+            setattr(self.__scheduler_config, argument, True)
             return True
         elif value.upper() in ['FALSE', '0', 'F', 'N', 'NO']:
-            setattr(self.__scheduler_config,argument,False)
+            setattr(self.__scheduler_config, argument, False)
             return True
         else:
             return False
@@ -376,13 +377,13 @@ class Application:
             _sys.stdout.write("First scheduler parameter is wrong!\n")
             return False
 
-        if len(arg)>2 and (arg[0] == 'A' or arg[0] == 'B'):
+        if len(arg) > 2 and (arg[0] == 'A' or arg[0] == 'B'):
             if int(arg[2]) > 0:
                 self.__scheduler_config.inc = int(arg[2])
             else:
                 return False
 
-        if len(arg)>3 and arg[0] == 'B':
+        if len(arg) > 3 and arg[0] == 'B':
             if int(arg[3]) >= 1:
                 self.__scheduler_config.processes = int(arg[3])
             else:
@@ -404,7 +405,7 @@ class Application:
                         _sys.stdout.write("\n ")
                         sig = (sym.name, len(sym.arguments), sym.positive)
                     _sys.stdout.write(" {}".format(sym))
-            _sys.stdout.write("\n".format(step))
+            _sys.stdout.write("\n")
         return True
 
     def register_options(self, options):
@@ -420,7 +421,7 @@ class Application:
 
         # Scheduler algorithms
         group = "Scheduler Options"
-        options.add(group, "scheduler",_textwrap.dedent("""\
+        options.add(group, "scheduler", _textwrap.dedent("""\
             Configure scheduler settings
                   <sched>: <type {A,B,C}>,<n>[,<S {1..umax}>][,<M {1..umax}>]
                     A,<n>    : Run algorithm A with parameter <n>{1..50}
@@ -431,21 +432,21 @@ class Application:
         , self.__parse_scheduler, argument="<sched>")
 
         # Scheduler options
-        options.add(group, "scheduler-start,F", "Starting horizon length [0]", lambda val : self.__parse_scheduler_greater_equal(val,"start"), argument="<n>")
-        options.add(group, "scheduler-end,T", "Ending horizon length [3000]", lambda val : self.__parse_scheduler_greater_equal(val,"limit"), argument="<n>")
-        options.add(group, "scheduler-verbose", "Set verbosity level to <n>", lambda val : self.__parse_scheduler_greater_equal(val,"verbose"), argument="<n>")
-        options.add(group, "conflicts-per-restart,i", "Short for -r F,<n> (see restarts)", lambda val : self.__parse_scheduler_greater_equal(val,"conflicts_per_restart"), argument="<n>")
-        options.add(group, "keep-after-unsat", "After finding n to be UNSAT, do keep runs with m<n [t]", lambda val : self.__parse_scheduler_boolean(val,"propagate_unsat"), argument="<b>")
+        options.add(group, "scheduler-start,F", "Starting horizon length [0]", lambda val: self.__parse_scheduler_greater_equal(val, "start"), argument="<n>")
+        options.add(group, "scheduler-end,T", "Ending horizon length [3000]", lambda val: self.__parse_scheduler_greater_equal(val, "limit"), argument="<n>")
+        options.add(group, "scheduler-verbose", "Set verbosity level to <n>", lambda val: self.__parse_scheduler_greater_equal(val, "verbose"), argument="<n>")
+        options.add(group, "conflicts-per-restart,i", "Short for -r F,<n> (see restarts)", lambda val: self.__parse_scheduler_greater_equal(val, "conflicts_per_restart"), argument="<n>")
+        options.add(group, "keep-after-unsat", "After finding n to be UNSAT, do keep runs with m<n [t]", lambda val: self.__parse_scheduler_boolean(val, "propagate_unsat"), argument="<b>")
 
 
         # Solving options
-        options.add(group, "final-at-last", "Fix query always at the last (grounded) time point [t]", lambda val : self.__parse_scheduler_boolean(val,"move_final"), argument="<b>")
-        options.add(group, "forbid-actions",_textwrap.dedent("""Forbid actions at time points after current plan length,
+        options.add(group, "final-at-last", "Fix query always at the last (grounded) time point [t]", lambda val: self.__parse_scheduler_boolean(val, "move_final"), argument="<b>")
+        options.add(group, "forbid-actions", _textwrap.dedent("""Forbid actions at time points after current plan length,
                                   using the predicate occurs/1 [f]""")
-        , lambda val : self.__parse_scheduler_boolean(val,"forbid_actions"), argument="<b>")
+        , lambda val: self.__parse_scheduler_boolean(val, "forbid_actions"), argument="<b>")
         options.add(group, "force-actions", _textwrap.dedent("""Force at least one action at time points before current plan length,
                                   using the predicate occurs/1 [f]""")
-        , lambda val : self.__parse_scheduler_boolean(val,"force_actions"), argument="<b>")
+        , lambda val: self.__parse_scheduler_boolean(val, "force_actions"), argument="<b>")
 
     def main(self, prg, files):
         """
@@ -464,20 +465,22 @@ class Application:
 
             # additional programs for scheduler
             if is_scheduler:
-                EXTERNALS_PROGRAM  = """
+                externals_program = """
                 #program dynamic.  #external skip(t).
                 """
-                FORBID_ACTIONS_PROGRAM = """
+                forbid_actions_program = """
                 #program dynamic.
                 :-     occurs(A),     skip(t). % no action
                 """
-                FORCE_ACTIONS_PROGRAM = """
+                force_actions_program = """
                 #program dynamic.
                 :- not occurs(_), not skip(t). % some action
                 """
-                program.append(EXTERNALS_PROGRAM)
-                if getattr(self.__scheduler_config,"forbid_actions",False):program.append(FORBID_ACTIONS_PROGRAM)
-                if getattr(self.__scheduler_config,"force_actions",False):program.append(FORCE_ACTIONS_PROGRAM)
+                program.append(externals_program)
+                if getattr(self.__scheduler_config, "forbid_actions", False):
+                    program.append(forbid_actions_program)
+                if getattr(self.__scheduler_config, "force_actions", False):
+                    program.append(force_actions_program)
 
             future_sigs, program_parts = _tf.transform(program, b.add)
 

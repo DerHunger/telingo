@@ -21,7 +21,7 @@ class Scheduler:
         pass
 
 
-    def next(self,result):
+    def next(self, result):
         """
         returns the next length to solve of the schedule.
         """
@@ -35,9 +35,10 @@ class A_Scheduler(Scheduler):
     Algorithm A uses a fixed sized list of linear increasing lengths beginning from a start value.
     The result of the solving process of a length determines how the scheduler handles the length:
     UNKNOWN:    the length gets moved to the end of the list to be solved later again
-    UNSAT/SAT:  the length and all smaller lengths get removed from the list and a new length gets added at the end of the list
+    UNSAT/SAT:  the length and all smaller lengths get removed from the list and
+                a new length gets added at the end of the list
     """
-    def __init__(self,start,inc,limit,size,propagate_unsat,verbose):
+    def __init__(self, start, inc, limit, size, propagate_unsat, verbose):
         """
         Initializes the A scheduler object.
 
@@ -59,7 +60,7 @@ class A_Scheduler(Scheduler):
         self.__nones           = set()
         self.__verbose         = verbose
 
-    def next(self,result):
+    def next(self, result):
         """
         Creates and manages the schedule with the given result and returns the next length to solve.
 
@@ -70,8 +71,8 @@ class A_Scheduler(Scheduler):
         if self.__first:
             if self.__length < 0 or self.__limit < self.__length or self.__inc <= 0: return None
             self.__first  = False
-            self.__runs   = [ self.__length+(i*self.__inc) for i in range(self.__size) ]
-            self.__runs   = [ i for i in self.__runs if (i<=self.__limit and i >= self.__length) ]
+            self.__runs   = [self.__length+(i*self.__inc) for i in range(self.__size) ]
+            self.__runs   = [i for i in self.__runs if (i <= self.__limit and i >= self.__length) ]
             if len(self.__runs) > 0: self.__length = self.__runs[-1]
         # No more runs left
         elif len(self.__runs) == 0: return None
@@ -96,7 +97,7 @@ class A_Scheduler(Scheduler):
             # UNSAT
             else:
                 if self.__propagate_unsat:
-                    self.__runs = [ i for i in self.__runs if i>=current_length ]
+                    self.__runs = [i for i in self.__runs if i >= current_length]
                 next_length = self.__length + self.__inc
                 if next_length <= self.__limit and not self.__nones:
                     self.__length = next_length
@@ -104,8 +105,8 @@ class A_Scheduler(Scheduler):
                 if self.__propagate_unsat:
                     tmp = next_length
                     while len(self.__runs) <= self.__size:
-                        tmp +=self.__inc
-                        if tmp > self.__limit : break
+                        tmp += self.__inc
+                        if tmp > self.__limit: break
                         self.__runs.append(tmp)
                     self.__length = tmp
 
@@ -113,7 +114,7 @@ class A_Scheduler(Scheduler):
 
         # log and return
         if self.__verbose: _sys.stdout.write("Queue:\t\t " + str(self.__runs) + "\n")
-        return self.__runs[0] if len(self.__runs)>0 else None
+        return self.__runs[0] if len(self.__runs) > 0 else None
 
 
 class B_Scheduler(Scheduler):
@@ -134,7 +135,7 @@ class B_Scheduler(Scheduler):
         """
         Run object containing details about a length.
         """
-        def __init__(self,index,length,effort,solve):
+        def __init__(self, index, length, effort, solve):
             """
             Initializes the run object.
 
@@ -154,10 +155,10 @@ class B_Scheduler(Scheduler):
             """
             Representes the run object.
             """
-            return "("+",".join([str(i) for i in [self.index,self.length,self.effort,self.solve]])+")"
+            return "("+", ".join([str(i) for i in [self.index, self.length, self.effort, self.solve]])+")"
 
 
-    def __init__(self,start,inc,limit,size,propagate_unsat,gamma,verbose):
+    def __init__(self, start, inc, limit, size, propagate_unsat, gamma, verbose):
         """
         Initializes the B scheduler object.
 
@@ -184,7 +185,7 @@ class B_Scheduler(Scheduler):
         self.__verbose         = verbose
 
 
-    def next(self,result):
+    def next(self, result):
         """
         Creates and manages the schedule with the given result and returns the next length to solve.
 
@@ -233,7 +234,7 @@ class B_Scheduler(Scheduler):
                 if len(self.__nones) == len(self.__next_runs): return None
                 first = self.__next_runs[0]
                 first.solve = True
-                self.__runs = [ first ]
+                self.__runs = [first]
                 # append runs, set solve if threshold is big enough
                 for i in self.__next_runs[1:]:
                     i.solve = True if (i.effort < (((first.effort+1) * (self.__gamma ** (i.index - first.index)))+0.5)) else False
@@ -241,8 +242,8 @@ class B_Scheduler(Scheduler):
 
             # else: add new runs
             else:
-                if len(self.__runs)>= self.__size: return None
-                self.__runs = [ self.Run(self.__index,self.__start+(self.__inc*self.__index),0,True) ]
+                if len(self.__runs) >= self.__size: return None
+                self.__runs = [self.Run(self.__index, self.__start+(self.__inc*self.__index), 0, True)]
                 self.__index += 1
                 first = self.__runs[0]
                 if first.length > self.__limit: return None
@@ -251,11 +252,11 @@ class B_Scheduler(Scheduler):
             self.__next_runs = []
 
             # add next runs
-            while (0.5 < ((first.effort+1) * (self.__gamma ** (self.__index - first.index)))) and not self.__nones:
-                if len(self.__runs)>= self.__size: break
+            while (((first.effort+1) * (self.__gamma ** (self.__index - first.index))) > 0.5) and not self.__nones:
+                if len(self.__runs) >= self.__size: break
                 next_length = self.__start+(self.__inc*self.__index)
                 if next_length > self.__limit: break
-                self.__runs.append(self.Run(self.__index,next_length,0,True))
+                self.__runs.append(self.Run(self.__index, next_length, 0, True))
                 self.__index += 1
 
         # log and return
@@ -274,7 +275,7 @@ class C_Scheduler(Scheduler):
     If the the result of the solving process is NONE, the length is moved to the end of the list, if UNSAT all length smaller equal to the length get removed from the list.
     A new length is calculated from the maximum length handled by the scheduler multiplied with the given increase value.
     """
-    def __init__(self,start,inc,limit,propagate_unsat,verbose):
+    def __init__(self, start, inc, limit, propagate_unsat, verbose):
         """
         Initializes the C scheduler object.
 
@@ -295,7 +296,7 @@ class C_Scheduler(Scheduler):
         self.__verbose         = verbose
 
 
-    def next(self,result):
+    def next(self, result):
         """
         Creates and manages the schedule with the given result and returns the next length to solve.
 
@@ -307,7 +308,7 @@ class C_Scheduler(Scheduler):
             if self.__length < 0 or self.__limit < 0 or self.__inc < 1 or self.__length > self.__limit: return None
             self.__runs = [self.__length]
             #if self.__length == 0: self.__length = 1
-            self.__first  = False
+            self.__first = False
 
         # NONE: check if all are None, append and pop
         elif result is None:
@@ -333,13 +334,13 @@ class C_Scheduler(Scheduler):
                 self.__runs.append(current_length)
             # UNSAT: propagate_unsat
             elif self.__propagate_unsat:
-                self.__runs = [ i for i in self.__runs if i>=current_length ]
+                self.__runs = [ i for i in self.__runs if i >= current_length ]
             # pop
             self.__runs = self.__runs[1:]
 
         # log and return
-        if self.__verbose:_sys.stdout.write("Queue:\t\t " + str(self.__runs) + "\n")
-        return self.__runs[0] if len(self.__runs)>0 else None
+        if self.__verbose: _sys.stdout.write("Queue:\t\t " + str(self.__runs) + "\n")
+        return self.__runs[0] if len(self.__runs) > 0 else None
 
 
 class Scheduler_Config:
@@ -349,7 +350,7 @@ class Scheduler_Config:
     A						- algorithm A parameter
     B						- algorithm B parameter
     C						- algorithm C parameter
-    inc						- horizon increase length (A,B only) [5]
+    inc						- horizon increase length (A, B only) [5]
     processes				- Maximum number of processes (B only) [20]
     start					- starting horizon length [0]
     limit					- ending horizon length [3000]
@@ -361,25 +362,23 @@ class Scheduler_Config:
     force-actions			- force at least one action at time points before current plan length, using the predicate occurs/1 [f]
     verbose					- set verbosity level [0]
     """
-    # scheduler
-    A = None
-    B = None
-    C = None
-    inc = 5
-    processes = 20
-    # options
-    start = 0
-    limit = 3000
-    restarts_per_solve = 100
-    conflicts_per_restart = 60
-    propagate_unsat = True
-    forbid_actions = False
-    force_actions = False
-    move_final = True # True - move final to current length, False - keep final at highest length
-    verbose = 0
 
     def __init__(self):
-        pass
+        self.A = None
+        self.B = None
+        self.C = None
+        self.inc = 5
+        self.processes = 20
+        # options
+        self.start = 0
+        self.limit = 3000
+        self.restarts_per_solve = 100
+        self.conflicts_per_restart = 60
+        self.propagate_unsat = True
+        self.forbid_actions = False
+        self.force_actions = False
+        self.move_final = True # True - move final to current length, False - keep final at highest length
+        self.verbose = 0
 
     def __str__(self):
         string = "\n"
@@ -407,21 +406,21 @@ class Scheduler_Config:
         scheduler = None
         if self.single_scheduler():
             if self.A:
-                scheduler = A_Scheduler(self.start,self.inc,self.limit,self.A,self.propagate_unsat,self.verbose)
+                scheduler = A_Scheduler(self.start, self.inc, self.limit, self.A, self.propagate_unsat, self.verbose)
             elif self.B:
-                scheduler = B_Scheduler(self.start,self.inc,self.limit,self.processes,self.propagate_unsat,self.B,self.verbose)
+                scheduler = B_Scheduler(self.start, self.inc, self.limit, self.processes, self.propagate_unsat, self.B, self.verbose)
             elif self.C:
-                scheduler = C_Scheduler(self.start,self.C,self.limit,self.propagate_unsat,self.verbose)
+                scheduler = C_Scheduler(self.start, self.C, self.limit, self.propagate_unsat, self.verbose)
         if scheduler is None:
-            scheduler = A_Scheduler(self.start,self.inc,self.limit,5,self.propagate_unsat,self.verbose)
+            scheduler = A_Scheduler(self.start, self.inc, self.limit, 5, self.propagate_unsat, self.verbose)
         return scheduler
 
     def single_scheduler(self):
         """
         Checks if there is only one algorithm defined for the scheduler.
         """
-        number = sum([1 for i in ['A','B','C'] if getattr(self,i,None) is not None])
-        if number >1: # check argument error
+        number = sum([1 for i in ['A','B','C'] if getattr(self, i, None) is not None])
+        if number > 1: # check argument error
             raise Exception("Please, choose only one Scheduler: A, B, or C")
             return False
         elif number == 1:
